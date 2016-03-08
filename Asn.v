@@ -28,15 +28,10 @@ Parameter free_var : Type.
 Inductive hprop : Type :=
 | htrue : hprop
 | hfalse : hprop
-(* | prop : Prop -> hprop 
-   这个构造子是否有必要？
-   优点：有的谓词可能无法用下面的构造子表示，自定义谓词之类也可以归入这个构造子。
-   缺点：加入该形式后可以引入的命题过于宽泛，可以用这个构造子做下面的很多事情。
-        变量替换的时候也难以触及Prop内提到的变量。*)
 | eqref : ref -> ref -> hprop
 | eqvar : name -> ref -> hprop
 | exp : expr -> ref -> hprop
-| bexp : bexpr -> hprop (* 这里出现的bexpr中仅包括或且非三种运算符 *)
+| bexp : bexpr -> hprop
 | vtype : ref -> rtype -> hprop
 | vsubtype : ref -> rtype -> hprop
 | emp : hprop
@@ -367,7 +362,7 @@ Inductive hprop : Type :=
 | eqref : ref -> ref -> hprop
 | eqvar : name -> ref -> hprop
 | exp : expr -> ref -> hprop
-| bexp : bexpr -> hprop (* 这里出现的bexpr中仅包括或且非三种运算符 *)
+| bexp : bexpr -> hprop
 | vtype : ref -> rtype -> hprop
 | vsubtype : ref -> rtype -> hprop
 | emp : hprop
@@ -1993,19 +1988,21 @@ Lemma lemma3_23: forall (hp : hprop) (e : expr) (a : name) (h : heap) (s : stack
     (eval (subst_name_1 a e hp) h s se)
     <-> (eval hp h (Stack.update a (Expr.eval e s) s) se).
 Proof.
-  intros hp e a h s se.
-  split.
-  intro H.
+  intros hp e a h s se. induction hp;
+  unfold subst_name_1; simpl; try reflexivity.
+  case (Name.eq_dec n a); intro H.
+  rewrite H. rewrite Name.beq_refl.
+  rewrite <- Stack.in_get.
+  simpl. unfold Expr.eval; split;
+  case e; intros; try rewrite H0;
+  try apply Stack.in_update_1;
+  apply smap_add in H0; rewrite H0;
+  try reflexivity.
 Admitted.
 
-Lemma lemma3_23': forall (hp : hprop) (b : bexpr) (a : name) (h : heap) (s : stack) (se : super_env),
+Axiom lemma3_23': forall (hp : hprop) (b : bexpr) (a : name) (h : heap) (s : stack) (se : super_env),
     (eval (subst_name_2 a b hp) h s se)
     <-> (eval hp h (Stack.update a (BExpr.bool2ref (BExpr.eval b s)) s) se).
-Proof.
-  intros hp b a h s se.
-  split.
-  intro H.
-Admitted. 
 
 Lemma lemma3_26: forall (r r1 r2 : ref) (hp1 hp2 : hprop) (a : name),
     r`a |-> r1 * ((r`a |-> r2 *-> hp1) * hp2) ==>

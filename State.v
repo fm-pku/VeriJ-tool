@@ -830,7 +830,6 @@ Definition build_msign (rt : rtype) (m : method) (t : method_type) (a : args)
                        (s : state) : state :=
     map_methods_env (TEnv.update_method rt m t)
     (map_mbody_env (MEnv.update_mbody_env rt m (a, MEnv.no_locvars, None)) s).
-(* 条件：method_type里的参数个数和args里的参数个数必须是一样的。 *)
 
 Definition new_obj (n : name) (t : rtype) (s : state) : state :=
     let r := Ref.get_new (get_alloc s) in
@@ -842,7 +841,6 @@ Definition new_obj (n : name) (t : rtype) (s : state) : state :=
                 (map_dtype (DType.update_dtype n t)
                 (map_stack (Stack.update n r) s)))
         end.
-(* 这样写似乎有误。每次调用r时都会申请一个新的ref。 *)
 
 Definition beq (s1 s2 : state) : bool :=
     match s1 with (a1, b1, c1, d1, e1, f1, g1, h1, i1, j1) =>
@@ -2104,20 +2102,6 @@ Qed.
 
 Close Scope string_scope.
 
-(*
-Lemma get_super_1 : forall (c : rtype) (l : list rtype) mf (s : state), 
-    RType.get_super c (get_super_env (build_class c l mf s)) = Some l.
-Proof.
-  intros c l mf s.
-  unfold build_class.
-  rewrite get_after_map_55.
-  unfold TEnv.update_super; unfold RType.get_super.
-  unfold RType.update_subtype_env.
-  apply Smap.find_1.
-  apply Smap.add_1. reflexivity.
-Qed.
-*)
-
 Lemma get_super_comm1 : forall (r c : rtype) l mf (s : state), 
     ~ (RType.peq c r) -> RType.get_super r (get_super_env (build_class c l mf s))
                        = RType.get_super r (get_super_env s).
@@ -2160,30 +2144,6 @@ Proof.
   rewrite get_after_map_59.
   reflexivity.
 Qed.
-
-(*
-Lemma get_cnames_1 : forall (c1 c2 : rtype) (ft : field_type) (s : state), 
-    get_cnames (build_class c1 c2 ft s) = TEnv.cnames_add c1 (get_cnames s).
-Proof.
-  intros c1 c2 ft s. unfold build_class.
-  rewrite get_after_map_65.
-  rewrite get_after_map_64.
-  rewrite get_after_map_66.
-  reflexivity.
-Qed.
-
-Lemma get_cnames_comm1 : forall (r : rtype) (m : method) (mt : method_type)
-                         (a : args) (lv : method_locvars) (c : cmd) (s : state), 
-    get_cnames (build_method r m mt a lv c s) = get_cnames s.
-Proof.
-  intros r m mt a lv c s.
-  unfold build_method.
-  rewrite get_after_map_67.
-  rewrite get_after_map_68.
-  rewrite get_after_map_69.
-  reflexivity.
-Qed.
-*)
 
 End State.
 

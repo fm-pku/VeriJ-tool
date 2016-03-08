@@ -20,19 +20,24 @@ Definition no_locvar := TEnv.method_no_locvar.
 Definition locvars := TEnv.update_method_locvars "c" Int no_locvar.
 
 Module Cell. (* Class Cell *)
- Definition fields  := RType.update_field_type "x" Int.
- Definition get_cmd := Lang.fread "c" "this" "x";
-                       Lang.creturn (^"c").
- Definition set_cmd := Lang.fwrite "this" "x" (^"v").
+ (* fields declaration *)
+ Definition fields := RType.update_field_type "x" Int.
  
+ (* predicates declaration *)
  Definition cell : pred := .\(fun this => .\(fun v => this`"x" |-> v)).
  
+ (* method get() *)
  Definition get_spec :=
      (|P|"cell"@"this"&r,
       |P|"cell"@"this"&r /.\ "res" +-> r).
+ Definition get_cmd  := Lang.fread "c" "this" "x";
+                       Lang.creturn (^"c").
+ 
+ (* method set(v) *)
  Definition set_spec :=
      (|P|"cell"@"this"&r,
       |P|"cell"@"this"&^"v").
+ Definition set_cmd  := Lang.fwrite "this" "x" (^"v").
  
  Definition declare (s : state) : state :=
      State.build_method "Cell" "get" (nil, Int) MEnv.no_args locvars get_cmd
@@ -41,12 +46,7 @@ Module Cell. (* Class Cell *)
 End Cell.
 
 Module ReCell. (* Class ReCell *)
- Definition fields   := RType.update_field_type "y" Int.
- Definition set_cmd  := Lang.fread "c" "this" "x";
-                        Lang.fwrite "this" "y" (^"c");
-                        Lang.fwrite "this" "x" (^"v").
- Definition undo_cmd := Lang.fread "c" "this" "y";
-                        Lang.fwrite "this" "x" (^"c").
+ Definition fields := RType.update_field_type "y" Int.
  
  Definition cell : pred := .\(fun this => .\(fun v => 
      =| (fun r' => this`"x" |-> v * this`"y" |-> r'))).
@@ -56,9 +56,15 @@ Module ReCell. (* Class ReCell *)
  Definition set_spec :=
      (|P|"cell"@"this"&r,
       |P|"bak"@"this"&r /.\ |P|"cell"@"this"&^"v").
+ Definition set_cmd  := Lang.fread "c" "this" "x";
+                        Lang.fwrite "this" "y" (^"c");
+                        Lang.fwrite "this" "x" (^"v").
+ 
  Definition undo_spec :=
      (|P|"bak"@"this"&r,
       |P|"cell"@"this"&r).
+ Definition undo_cmd := Lang.fread "c" "this" "y";
+                        Lang.fwrite "this" "x" (^"c").
  
  Definition declare (s : state) : state :=
      State.build_method "ReCell" "undo" (nil, Null) MEnv.no_args locvars undo_cmd
@@ -67,12 +73,13 @@ Module ReCell. (* Class ReCell *)
 End ReCell.
 
 Module TCell. (* Class TCell *)
- Definition fields   := RType.update_field_type "y" Int.
+ Definition fields := RType.update_field_type "y" Int.
+ 
+ Definition cell : pred := .\(fun this => .\(fun v => this`"y" |-> v)).
+ 
  Definition get_cmd := Lang.fread "c" "this" "y";
                        Lang.creturn (^"c").
  Definition set_cmd := Lang.fwrite "this" "y" (^"v").
- 
- Definition cell : pred := .\(fun this => .\(fun v => this`"y" |-> v)).
  
  Definition declare (s : state) : state :=
      State.build_method "TCell" "get" (nil, Int) MEnv.no_args locvars get_cmd

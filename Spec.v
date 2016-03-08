@@ -7,17 +7,19 @@ Require Export Sem.
 
 Module Type SPEC.
 
-Parameter name : Type.
-Parameter rtype : Type.
 Parameter heap : Type.
 Parameter stack : Type.
-Parameter cmd : Type.
-Parameter method : Type.
-Parameter hprop : Type.
-Parameter state : Type.
-Parameter conf : Type.
+Definition name := Name.name.
+Definition method := Method.method.
+Definition rtype := RType.rtype.
+Definition ref := Ref.ref.
+Definition bexpr := BExpr.bexpr.
+Definition expr := Expr.expr.
+Definition cmd := Lang.cmd.
+Definition hprop := HProp.hprop.
+Definition state := State.state.
 
-Parameter spec : Type.
+Definition spec := (hprop * hprop)%type.
 Parameter program_spec : Type.
 Parameter init_program_spec : program_spec.
 
@@ -73,13 +75,189 @@ Notation "S + e |= ps" := (program_satisfy S e ps) (at level 30) : spec_scope.
 Infix "<<=" := refine (at level 70) : spec_scope.
 
 Open Scope spec_scope.
+Open Scope hprop_scope.
+Open Scope string_scope.
 
 Axiom prog_satis_init : forall (S : state) (e : pred_env), S + e |= init_program_spec.
 
 Axiom refine_refl : forall sp : spec, sp <<= sp.
 Axiom refine_trans : forall sp1 sp2 sp3 : spec,
     sp1 <<= sp2 -> sp2 <<= sp3 -> sp1 <<= sp3.
+Axiom refine_cons1 : forall p1 p2 p3 : hprop, p3 ==> p2 -> (p1, p2) <<= (p1, p3).
+Axiom refine_cons2 : forall p1 p2 p3 : hprop, p1 ==> p3 -> (p1, p2) <<= (p3, p2).
 
+(* verification rules *)
+(* {P} skip {P} *)
+Axiom h_skip : forall (p : hprop) (S : state) (t : rtype) (e : pred_env),
+    S + e, t |- (p, p) # Lang.skip.
+(* {P[e/n]} n := e {P} *)
+Axiom h_asn : forall (p1 p2 : hprop) (n : name) (e : expr) (S : state)
+                     (t : rtype) (pe : pred_env),
+    p1 ==> HProp.subst_name_1 n e p2 ->
+    S + pe,t |- (p1, p2) # Lang.assign n e.
+(* {P[b/n]} n := b {P} *)
+Axiom h_asnb : forall (p1 p2 : hprop) (n : name) (b : bexpr) (S : state)
+                      (t : rtype) (e : pred_env),
+               p1 ==> HProp.subst_name_2 n b p2 -> 
+               S + e, t |- (p1, p2) # Lang.assignb n b.
+
+(* {v = r1 /\ r1.a |-> - /\ e = r2} v.a := e {v = r1 /\ r1.a |-> r2 /\ e = r2} *)
+Axiom h_mut : forall (v a : name) (e : expr) (S : state) (r1 r2 r3: ref)
+                     (t : rtype) (pe : pred_env),
+    S + pe, t |- (v +-> r1 /.\ r1`a |-> r3 /.\ e |=> r2,
+                 v +-> r1 /.\ r1`a |-> r2 /.\ e |=> r2) # Lang.fwrite v a e.
+(* x <> v -> {v = r1 /\ r1.a |-> r2} x := v.a {v = r1 /\ r1.a |-> r2 /\ x = r2} *)
+Axiom h_lkp : forall (x v a: name) (S : state) (r1 r2: ref) (t : rtype) (e : pred_env),
+    x <> v ->
+    S + e, t |- (v +-> r1 /.\ r1`a |-> r2,
+                 v +-> r1 /.\ r1`a |-> r2 /.\ x +-> r2) # Lang.fread x v a.
+(* {v = r1 /\ r1.a |-> r2} x := x.a {x = r2 /\ r1.a |-> r2} *)
+Axiom h_lkp' : forall (x a: name) (S : state) (r1 r2: ref) (t : rtype) (e : pred_env),
+    S + e, t |- (x +-> r1 /.\ r1`a |-> r2,
+                 x +-> r2 /.\ r1`a |-> r2) # Lang.fread x x a.
+
+(* {v = r /\ r <: C} x := (C)v {x = r} *)
+Axiom h_cast : forall (x v: name) (C : rtype) (S : state) (r: ref)
+                      (t : rtype) (e : pred_env),
+    S + e, t |- (v +-> r /.\ r <: C, x +-> r) # Lang.cast x C v.
+
+(* {P[e/"res"]} return e {P} *)
+Axiom h_res : forall (p1 p2 : hprop) (e : expr) (S : state) (t : rtype) (pe : pred_env),
+    p1 ==> HProp.subst_name_1 "res" e p2 ->
+    S + pe, t |- (p1, p2) # (Lang.creturn e).
+
+(* {P} c1 {Q} -> {Q} c2 {R} -> {P} c1; c2 {R} *)
+Axiom h_seq : forall (p q r: hprop) (c1 c2 : cmd) (S : state)
+                     (t : rtype) (e : pred_env),
+    S + e, t |- (p, q) # c1 -> S + e, t |- (q, r) # c2 ->
+    S + e, t |- (p, r) # (Lang.cseq c1 c2).
+
+Parameter subst_args1 : hprop -> name -> name -> list name -> list expr -> hprop.
+Parameter subst_args2 : hprop -> list name -> list expr -> hprop.
+
+(* {P} C.m(args) {Q} -> v : C ->
+   {P[v/this][le/args]} x := v.m(le) {Q[x/res][v/this][le/args]}*)
+Axiom h_dinv : forall S e v t t' m p1 p2 mb ps x le,
+    get_spec t m ps = Some (p1, p2) ->
+    MEnv.find_mbody (State.get_mbody_env S) t m = Some mb ->
+    DType.get_dtype v (State.get_dtype S) = Some t ->
+    S + e, t' |- (subst_args1 p1 x v (MEnv.get_args mb) le,
+                  subst_args1 p2 x v (MEnv.get_args mb) le) # Lang.dcall x v m le.
+
+(* {P} C.m(args) {Q} ->
+   {P[v/this][le/args]} x := v.C::m(le) {Q[x/res][v/this][le/args]}*)
+Axiom h_sinv : forall S e v t t' m p1 p2 mb ps x le,
+    get_spec t m ps = Some (p1, p2) ->
+    MEnv.find_mbody (State.get_mbody_env S) t m = Some mb ->
+    S + e, t' |- (subst_args1 p1 x v (MEnv.get_args mb) le,
+                  subst_args1 p2 x v (MEnv.get_args mb) le) # Lang.scall x v t m le.
+
+(* {P} C(args) {Q} ->
+   {P[le/args]} x := new C(le) {Q[x/this][le/args]}*)
+Axiom h_new : forall S e p1 p2 mb ps x t t' le,
+    get_spec t t ps = Some (p1, p2) ->
+    MEnv.find_mbody (State.get_mbody_env S) t t = Some mb ->
+    S + e, t' |- (subst_args2 p1 (MEnv.get_args mb) le,
+                  HProp.subst_name_3 "this" x
+                    (subst_args2 p2 (MEnv.get_args mb) le)) # Lang.calloc x t le.
+
+(* (l1 = l2 -> {P} c {Q}) -> {P /\ l1 = l2} c {Q} *)
+Axiom list_eq_ext : forall S e t c (l1 l2 : list ref) (hp1 hp2 : hprop),
+    (l1 = l2 -> S + e, t |- (hp1, hp2) # c) ->
+     S + e, t |- (hp1 /.\ HProp.list_eq l1 l2, hp2) # c.
+
+(* "the variables c modifies" is disjoint with "the free variables in R"
+   -> {P} c {Q} -> {P * R} c {Q * R} *)
+Axiom h_frame : forall (p q r: hprop) (c : cmd) (S : state) (t : rtype) (e : pred_env),
+    sset_dsj (Lang.md c) (HProp.fv r) ->
+    S + e, t |- (p, q) # c -> S + e, t |- (p * r, q * r) # c.
+(* "the variables c modifies" is disjoint with "the free variables in R"
+   -> "R is an assertion independent of the heap"
+   -> {P} c {Q} -> {P /\ R} c {Q /\ R} *)
+Axiom h_frame' : forall (p q r: hprop) (c : cmd) (S : state)
+                        (t : rtype) (e : pred_env),
+    sset_dsj (Lang.md c) (HProp.fv r) -> HProp.stack_hprop r ->
+        S + e, t |- (p, q) # c -> S + e, t |- (p /.\ r, q /.\ r) # c.
+
+(* {P} c {Q /\ R} <-> {P} c {Q} /\ {P} c {R} *)
+Axiom h_div1 : forall (p q r: hprop) (c : cmd) (S : state)
+                     (t : rtype) (e : pred_env),
+    S + e, t |- (p, q /.\ r) # c <->
+    S + e, t |- (p, q) # c /\ S + e, t |- (p, r) # c.
+(* {P \/ R} c {Q} <-> {P} c {Q} /\ {R} c {Q} *)
+Axiom h_div2 : forall (p q r: hprop) (c : cmd) (S : state)
+                     (t : rtype) (e : pred_env),
+    S + e, t |- (p \./ r, q) # c <->
+    S + e, t |- (p, q) # c /\ S + e, t |- (r, q) # c.
+
+(* {P /\ b} c1 {Q} -> {P /\ ~b} c2 {Q} ->
+   {P} if b then c1 else c2 {Q} *)
+Axiom h_cond : forall (p q : hprop) (b : BExpr.bexpr) (c1 c2 : cmd) (S : state)
+                      (t : rtype) (e : pred_env),
+              S + e, t |- (p /.\ 'b, q) # c1
+           -> S + e, t |- (p /.\ ~` 'b, q) # c2
+           -> S + e, t |- (p, q) # Lang.cif b c1 c2.
+(* (P -> b) -> {P} c1 {Q} -> {P} if b then c1 else c2 {Q} *)
+Axiom h_cond1 : forall (p q : hprop) (b : BExpr.bexpr) (c1 c2 : cmd) (S : state)
+                      (t : rtype) (e : pred_env),
+    p ==> 'b -> S + e, t |- (p, q) # c1
+    -> S + e, t |- (p, q) # Lang.cif b c1 c2.
+(* (P -> ~b) -> {P} c2 {Q} -> {P} if b then c1 else c2 {Q} *)
+Axiom h_cond2 : forall (p q : hprop) (b : BExpr.bexpr) (c1 c2 : cmd) (S : state)
+                      (t : rtype) (e : pred_env),
+    p ==> ~` 'b -> S + e, t |- (p, q) # c2
+    -> S + e, t |- (p, q) # Lang.cif b c1 c2.
+
+(* {P /\ b} c {P} -> {P} while b c {P /\ ~b} *)
+Axiom h_iter : forall (p : hprop) (b : BExpr.bexpr) (c : cmd) (S : state)
+                      (t : rtype) (e : pred_env),
+    S + e, t |- (p /.\ 'b, p) # c ->
+    S + e, t |- (p, p /.\ ~` 'b) # (Lang.cwhile b c).
+Proof.
+
+(* (P2 -> P3) -> {P1} c {P2} -> {P1} c {P3} *)
+Axiom h_cons_1 : forall (p1 p2 p3 : hprop) (c : cmd) (S : state)
+                        (t : rtype) (e : pred_env),
+    p2 ==> p3 -> S + e, t |- (p1, p2) # c -> S + e, t |- (p1, p3) # c.
+(* (P3 -> P1) -> {P1} c {P2} -> {P3} c {P2} *)
+Axiom h_cons_2 : forall (p1 p2 p3 : hprop) (c : cmd) (S : state)
+                        (t : rtype) (e : pred_env),
+    p3 ==> p1 -> S + e, t |- (p1, p2) # c -> S + e, t |- (p3, p2) # c.
+
+(* (forall r, {P r} c {Q r}) -> {exists r, P r} c {exists r, Q r} *)
+Axiom h_ex : forall (p q: ref -> hprop) (c : cmd) (S : state)
+                    (t : rtype) (e : pred_env),
+    (forall r : ref, S + e, t |- (p r, q r) # c) -> S + e, t |- (=| p, =| q) # c.
+(* (forall r, {P r} c {Q}) -> {exists r, P r} c {Q} *)
+Axiom h_ex1 : forall (p : ref -> hprop) (q : hprop) (c : cmd) (S : state)
+                     (t : rtype) (e : pred_env),
+    (forall r : ref, S + e, t |- (p r, q) # c) -> S + e, t |- (=| p, q) # c.
+(* {P} c {Q r} -> {P} c {exists r, Q r} *)
+Axiom h_ex2 : forall (p : hprop) (q : ref -> hprop) (r : ref) (c : cmd)
+                     (S : state) (t : rtype) (e : pred_env),
+    S + e, t |- (p, q r) # c -> S + e, t |- (p, =| q) # c.
+(* (forall l, {P l} c {Q}) -> {exists l, P l} c {Q} *)
+Axiom h_ex3 : forall (p : list ref -> hprop) (q : hprop) (c : cmd) (S : state)
+                     (t : rtype) (e : pred_env),
+    (forall l, S + e, t |- (p l, q) # c) -> S + e, t |- (E| p, q) # c.
+(* {P} c {Q l} -> {P} c {exists l, Q l} *)
+Axiom h_ex4 : forall (p : hprop) (q : list ref -> hprop) (l : list ref)
+                     (c : cmd) (S : state) (t : rtype) (e : pred_env),
+    S + e, t |- (p, q l) # c -> S + e, t |- (p, E| q) # c.
+
+(* {False} c {P} *)
+Axiom h_contrad : forall (p : hprop) (c : cmd) (S : state) (t : rtype) (e : pred_env),
+    S + e, t |- (HProp.hfalse, p) # c.
+(* "R has no free variable" -> {P} {Q} refines {P * R} {Q * R} *)
+Axiom refine_frame : forall p q r : hprop,
+    HProp.fv r = Sset.empty -> (p * r, q * r) <<= (p, q).
+(* (forall r, {P2} {Q2} refines {P1 r} {Q1 r}) ->
+   {P2} {Q2} refines {exists r, P1 r} {exists r, Q1 r} *)
+Axiom refine_exist : forall (p1 q1 : ref -> hprop) (p2 q2 : hprop) (r : ref),
+    (forall r, (p1 r, q1 r) <<= (p2, q2)) -> (=|p1, =|q1) <<= (p2, q2).
+
+Close Scope string_scope.
+Close Scope hprop_scope.
 Close Scope spec_scope.
 
 End SPEC.

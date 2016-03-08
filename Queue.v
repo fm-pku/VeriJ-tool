@@ -9,6 +9,7 @@ Definition rfalse := Ref.rfalse.
 Definition Bool := RType.Bool.
 Definition Null := RType.Null.
 Definition ref := Ref.ref.
+Definition no_lv := TEnv.method_no_locvar.
 Definition add_lv := TEnv.update_method_locvars.
 Definition state := State.state.
 Definition init_state := State.init_state.
@@ -21,21 +22,19 @@ Open Scope spec_scope.
 
 Variable (r : ref) (alpha : list ref).
 
-Definition no_lv := TEnv.method_no_locvar.
-
 Module Node. (* Class Node *)
+ (* fields declaration *)
  Definition fields f := RType.update_field_type "val" Bool
                         (RType.update_field_type "nxt" "Node" f).
- Definition Node_cmd := Lang.fwrite "this" "val" (^"b");
-                        Lang.fwrite "this" "nxt" Expr.null.
  
  (* public predicate *)
  Definition node : pred := .\(fun this => .\(fun n => .\(fun v =>
      this`"val" |-> v * this`"nxt" |-> n))).
  
- Definition Node_spec :=
-     (HProp.emp,
-      node&^"this"&null&^"b").
+ (* constructor Node() *)
+ Definition Node_spec := (HProp.emp, node&^"this"&null&^"b").
+ Definition Node_cmd := Lang.fwrite "this" "val" (^"b");
+                        Lang.fwrite "this" "nxt" Expr.null.
  
  Definition declare (s : state) : state :=
      State.build_method "Node" "Node" (Bool::nil, Null) ("b"::nil) no_lv Node_cmd
@@ -43,33 +42,7 @@ Module Node. (* Class Node *)
 End Node.
 
 Module Queue. (* Class Queue *)
- Definition fields      := RType.update_field_type "hd" "Node".
- Definition Queue_lv    := add_lv "x" "Node" no_lv.
- Definition enqueue_lv  := add_lv "p" "Node" (add_lv "q" "Node"
-                          (add_lv "n" "Node" no_lv)).
- Definition dequeue_lv  := add_lv "p" "Node" (add_lv "h" "Node"
-                          (add_lv "x" "Bool" no_lv)).
- Definition empty_lv    := add_lv "p" "Node" (add_lv "b" "Bool" no_lv).
- 
- Definition Queue_cmd   := Lang.calloc "x" "Node" (Expr.fals::nil);
-                           Lang.fwrite "this" "hd" (^"x").
- Definition enqueue_cmd := Lang.fread "p" "this" "hd";
-                           Lang.fread "q" "p" "nxt";
-                           Lang.cwhile (BExpr.bneg (BExpr.bequal (^"q") Expr.null))
-                               (Lang.assign "p" (^"q");
-                                Lang.fread "q" "p" "nxt");
-                           Lang.calloc "n" "Node" (^"b"::nil);
-                           Lang.fwrite "p" "nxt" (^"n").
- Definition dequeue_cmd := Lang.fread "h" "this" "hd";
-                           Lang.fread "p" "h" "nxt";
-                           Lang.fread "x" "p" "val";
-                           Lang.fread "p" "p" "nxt";
-                           Lang.fwrite "h" "nxt" (^"p");
-                           Lang.creturn (^"x").
- Definition empty_cmd   := Lang.fread "p" "this" "hd";
-                           Lang.fread "p" "p" "nxt";
-                           Lang.assignb "b" (BExpr.bequal (^"p") Expr.null);
-                           Lang.creturn (^"b").
+ Definition fields := RType.update_field_type "hd" "Node".
  
  (* predicates *)
  Fixpoint plist_def (this r1 r2 : ref) (alpha : list ref) : pred :=
@@ -83,20 +56,46 @@ Module Queue. (* Class Queue *)
  Definition queue : pred := .\(fun this => ,\(fun alpha =>
      =|(fun r_h => this`"hd" |-> r_h * plist&this&r_h&null&`(rfalse::alpha)))).
  
- Definition Queue_spec :=
-     (HProp.emp,
-      |P|"queue"@"this"&`nil).
+ Definition Queue_spec := (HProp.emp, |P|"queue"@"this"&`nil).
+ Definition Queue_lv   := add_lv "x" "Node" no_lv.
+ Definition Queue_cmd  := Lang.calloc "x" "Node" (Expr.fals::nil);
+                           Lang.fwrite "this" "hd" (^"x").
+ 
  Definition enqueue_spec :=
      (|P|"queue"@"this"&`alpha,
       =|(fun r => |P|"queue"@"this"&`(alpha++r::nil) /.\ "b" +-> r)).
+ Definition enqueue_lv   := add_lv "p" "Node" (add_lv "q" "Node"
+                           (add_lv "n" "Node" no_lv)).
+ Definition enqueue_cmd  := Lang.fread "p" "this" "hd";
+                            Lang.fread "q" "p" "nxt";
+                            Lang.cwhile (BExpr.bneg (BExpr.bequal (^"q") Expr.null))
+                                (Lang.assign "p" (^"q");
+                                 Lang.fread "q" "p" "nxt");
+                            Lang.calloc "n" "Node" (^"b"::nil);
+                            Lang.fwrite "p" "nxt" (^"n").
+ 
  Definition dequeue_spec :=
      (|P|"queue"@"this"&`(r::alpha),
       |P|"queue"@"this"&`alpha * HProp.htrue /.\ "res" +-> r).
+ Definition dequeue_lv   := add_lv "p" "Node" (add_lv "h" "Node"
+                           (add_lv "x" "Bool" no_lv)).
+ Definition dequeue_cmd  := Lang.fread "h" "this" "hd";
+                            Lang.fread "p" "h" "nxt";
+                            Lang.fread "x" "p" "val";
+                            Lang.fread "p" "p" "nxt";
+                            Lang.fwrite "h" "nxt" (^"p");
+                            Lang.creturn (^"x").
+ 
  Definition empty_spec :=
      (|P|"queue"@"this"&`alpha,
       |P|"queue"@"this"&`alpha /.\
           match alpha with | nil => "res" +-> rtrue
                            |  _  => "res" +-> rfalse end).
+ Definition empty_lv   := add_lv "p" "Node" (add_lv "b" "Bool" no_lv).
+ Definition empty_cmd  := Lang.fread "p" "this" "hd";
+                          Lang.fread "p" "p" "nxt";
+                          Lang.assignb "b" (BExpr.bequal (^"p") Expr.null);
+                          Lang.creturn (^"b").
  
  Definition declare (s : state) : state :=
      State.build_method "Queue" "dequeue" (nil, Bool) nil dequeue_lv dequeue_cmd
@@ -107,28 +106,7 @@ Module Queue. (* Class Queue *)
 End Queue.
 
 Module EQueue. (* Class EQueue *)
- Definition fields      := RType.update_field_type "tl" "Node".
- Definition EQueue_lv   := add_lv "x" "Node" no_lv.
- Definition enqueue_lv  := add_lv "p" "Node" (add_lv "n" "Node" no_lv).
- Definition dequeue_lv  := add_lv "p" "Node" (add_lv "h" "Node"
-                          (add_lv "x" "Bool" no_lv)).
- 
- Definition EQueue_cmd  := Lang.calloc "x" "Node" (Expr.fals::nil);
-                           Lang.fwrite "this" "hd" (^"x");
-                           Lang.fwrite "this" "tl" (^"x").
- Definition enqueue_cmd := Lang.fread "p" "this" "tl";
-                           Lang.calloc "n" "Node" (^"b"::nil);
-                           Lang.fwrite "p" "nxt" (^"n");
-                           Lang.fwrite "this" "tl" (^"n").
- Definition dequeue_cmd := Lang.fread "h" "this" "hd";
-                           Lang.fread "p" "h" "nxt";
-                           Lang.fread "x" "p" "val";
-                           Lang.fread "p" "p" "nxt";
-                           Lang.fwrite "h" "nxt" (^"p");
-                           Lang.cif (BExpr.bequal (^"p") Expr.null)
-                               (Lang.fwrite "this" "tl" (^"h"))
-                               (Lang.skip);
-                           Lang.creturn (^"x").
+ Definition fields := RType.update_field_type "tl" "Node".
  
  (* predicates *)
  Definition plist : pred := Queue.plist.
@@ -138,6 +116,28 @@ Module EQueue. (* Class EQueue *)
      Node.node&r_t&null&(last (rfalse::alpha) rfalse))))).
  
  Definition EQueue_spec := Queue.Queue_spec.
+ Definition EQueue_lv   := add_lv "x" "Node" no_lv.
+ Definition EQueue_cmd  := Lang.calloc "x" "Node" (Expr.fals::nil);
+                           Lang.fwrite "this" "hd" (^"x");
+                           Lang.fwrite "this" "tl" (^"x").
+ 
+ Definition enqueue_lv  := add_lv "p" "Node" (add_lv "n" "Node" no_lv).
+ Definition enqueue_cmd := Lang.fread "p" "this" "tl";
+                           Lang.calloc "n" "Node" (^"b"::nil);
+                           Lang.fwrite "p" "nxt" (^"n");
+                           Lang.fwrite "this" "tl" (^"n").
+ 
+ Definition dequeue_lv  := add_lv "p" "Node" (add_lv "h" "Node"
+                          (add_lv "x" "Bool" no_lv)).
+ Definition dequeue_cmd := Lang.fread "h" "this" "hd";
+                           Lang.fread "p" "h" "nxt";
+                           Lang.fread "x" "p" "val";
+                           Lang.fread "p" "p" "nxt";
+                           Lang.fwrite "h" "nxt" (^"p");
+                           Lang.cif (BExpr.bequal (^"p") Expr.null)
+                               (Lang.fwrite "this" "tl" (^"h"))
+                               (Lang.skip);
+                           Lang.creturn (^"x").
  
  Definition declare (s : state) : state :=
      State.build_method "EQueue" "dequeue" (nil, Bool) nil dequeue_lv dequeue_cmd
